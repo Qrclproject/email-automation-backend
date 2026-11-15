@@ -8,23 +8,31 @@ import sharp from 'sharp';
 import axios from 'axios';
 import { uploadFileToMinio } from '../services/minioService';
 
-const connection = new IORedis({
-  host: process.env.REDIS_HOST || '127.0.0.1',
-  port: Number(process.env.REDIS_PORT) || 6379,
+// Use the full REDIS_URL provided by Coolify
+const connection = new IORedis(process.env.REDIS_URL as string, {
   maxRetriesPerRequest: null,
 });
 
-const replaceVariables = (text: string, data: Record<string, string>, mappings: Record<string, string>) => {
+const replaceVariables = (
+  text: string, 
+  data: Record<string, string>, 
+  mappings: Record<string, string>
+) => {
   let processed = text;
+  
+  // 1. Replace exact keys from the Step 3 mappings
   Object.entries(mappings).forEach(([templateVar, csvColumn]) => {
     const value = data[csvColumn] || '';
     processed = processed.split(templateVar).join(value);
   });
+
+  // 2. Fallback for any {{Variable}} or [Variable] that wasn't mapped
   Object.keys(data).forEach(key => {
     const value = data[key] || '';
     processed = processed.split(`{{${key}}}`).join(value);
     processed = processed.split(`[${key}]`).join(value);
   });
+  
   return processed;
 };
 
@@ -35,7 +43,9 @@ export const emailWorker = new Worker(
     
     const toEmail = recipientData.email || recipientData['Email Address'] || recipientData['Email'] || recipientData['email address'] || recipientData['email'];
     
-    if (!toEmail) throw new Error(`No email column mapped. Columns: ${Object.keys(recipientData).join(', ')}`);
+    if (!toEmail) {
+      throw new Error(`Recipient has no email address column mapped. Columns: ${Object.keys(recipientData).join(', ')}`);
+    }
 
     try {
       const campaign = await Campaign.findById(campaignId);
@@ -48,20 +58,19 @@ export const emailWorker = new Worker(
       if (campaign.template && campaign.template.imageUrl && campaign.template.qrPosition) {
         const template = campaign.template;
         
-        // 1. Determine what data goes into the QR Code
+        // Determine what data goes into the QR Code
         let qrPayload = 'https://qrcodeng.com';
         if (template.qrDataField && recipientData[template.qrDataField]) {
            qrPayload = recipientData[template.qrDataField];
         } else if (variableMappings[template.qrDataField]) {
-           // If the design used a mapped variable for the QR
            qrPayload = recipientData[variableMappings[template.qrDataField]];
         }
 
-        // 2. Download the background image
+        // Download background image
         const bgRes = await axios.get(template.imageUrl, { responseType: 'arraybuffer' });
         const bgBuffer = Buffer.from(bgRes.data, 'binary');
 
-        // 3. Generate QR Code
+        // Generate QR Code
         const qrBuffer = await QRCode.toBuffer(qrPayload, {
           width: Math.round(template.qrPosition.width),
           margin: 1,
@@ -71,7 +80,7 @@ export const emailWorker = new Worker(
           }
         });
 
-        // 4. Merge them using Sharp
+        // Merge them using Sharp
         const compositeBuffer = await sharp(bgBuffer)
           .composite([{
             input: qrBuffer,
@@ -81,11 +90,11 @@ export const emailWorker = new Worker(
           .png()
           .toBuffer();
 
-        // 5. Upload merged image to MinIO
+        // Upload merged image to MinIO
         const mergedFileName = `merged/${campaignId}-${toEmail}-${Date.now()}.png`;
         const finalImageUrl = await uploadFileToMinio(compositeBuffer, mergedFileName, 'image/png');
 
-        // 6. Replace the background URL in the HTML body with the new merged image
+        // Replace the background URL in the HTML body with the new merged image
         finalBody = finalBody.split(template.imageUrl).join(finalImageUrl);
       }
       // -------------------------------
@@ -145,7 +154,7 @@ export const emailWorker = new Worker(
       const campaign = await Campaign.findById(campaignId);
       if (campaign) {
         const recipientIndex = campaign.recipients.findIndex(
-          (r: any) => r.data === recipientData || r.data?.email === toEmail
+          (r: any) => r.data === recipientData || r.data?.email === toEmail || r.data?.['Email Address'] === toEmail
         );
         
         if (recipientIndex !== -1) {
@@ -170,3 +179,11 @@ export const emailWorker = new Worker(
     limiter: { max: 5, duration: 5000 }
   }
 );
+
+emailWorker.on('completed', (job) => {
+  console.log(`Job ${job.id} completed!`);
+});
+
+emailWorker.on('failed', (job, err) => {
+  console.log(`Job ${job?.id} failed with error ${err.message}`);
+});
