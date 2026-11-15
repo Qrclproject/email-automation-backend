@@ -1,21 +1,21 @@
 import * as Minio from 'minio';
 
-const minioClient = new Minio.Client({
-  endPoint: process.env.MINIO_ENDPOINT as string,
-  useSSL: process.env.MINIO_USE_SSL === 'true',
-  accessKey: process.env.MINIO_ACCESS_KEY as string,
-  secretKey: process.env.MINIO_SECRET_KEY as string,
-});
-
-const bucketName = process.env.MINIO_BUCKET as string;
-
 export const uploadFileToMinio = async (fileBuffer: Buffer, fileName: string, mimetype: string): Promise<string> => {
   try {
+    // Initialize the client INSIDE the function so it reads env vars at runtime
+    const minioClient = new Minio.Client({
+      endPoint: process.env.MINIO_ENDPOINT as string,
+      useSSL: process.env.MINIO_USE_SSL === 'true',
+      accessKey: process.env.MINIO_ACCESS_KEY as string,
+      secretKey: process.env.MINIO_SECRET_KEY as string,
+    });
+
+    const bucketName = process.env.MINIO_BUCKET as string;
+
     // Ensure bucket exists
     const bucketExists = await minioClient.bucketExists(bucketName);
     if (!bucketExists) {
       await minioClient.makeBucket(bucketName, 'us-east-1');
-      // Note: You might need to set a public policy on the bucket in MinIO UI
     }
 
     // Upload the file
