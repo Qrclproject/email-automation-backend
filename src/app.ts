@@ -8,9 +8,12 @@ import accountRoutes from './routes/accountRoutes';
 
 const app = express();
 
-app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
+// UPDATE THIS LINE to accept your live frontend
+app.use(cors({ 
+  origin: ['http://localhost:5173', 'https://automate.qrcodeng.com'], 
+  credentials: true 
+}));
 
-// INCREASE PAYLOAD LIMIT to handle large HTML emails
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
