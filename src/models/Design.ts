@@ -6,8 +6,8 @@ export interface IDesign extends Document {
   qrPosition?: any;
   qrPadding?: number;
   qrConfig?: any;
+  qrDataField?: string; // Added this
   textOverlays?: any[];
-  qrDataFields?: string[];
 }
 
 const designSchema: Schema = new Schema({
@@ -16,8 +16,8 @@ const designSchema: Schema = new Schema({
   qrPosition: { type: Schema.Types.Mixed },
   qrPadding: { type: Number },
   qrConfig: { type: Schema.Types.Mixed },
+  qrDataField: { type: String, default: '{{Email Address}}' }, // Added this
   textOverlays: { type: [Schema.Types.Mixed] },
-  qrDataFields: { type: [String] },
 }, { timestamps: true });
 
 export default mongoose.model<IDesign>('Design', designSchema);
