@@ -73,7 +73,7 @@ export const deleteCampaign = async (req: Request, res: Response) => {
   }
 };
 
-// --- NEW CHECK-IN FUNCTION ---
+// --- CHECK-IN CONTROLLER ---
 export const checkInAttendee = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
@@ -88,7 +88,7 @@ export const checkInAttendee = async (req: Request, res: Response) => {
       return res.status(404).json({ message: 'Campaign not found' });
     }
 
-    // Find the recipient that matches the scanned value in ANY of their data fields
+    // Find the recipient matching the scan (ignoring case and spaces)
     const recipientIndex = campaign.recipients.findIndex((r: any) => {
       return Object.values(r.data).some(
         (val) => String(val).trim().toLowerCase() === scannedValue.trim().toLowerCase()
@@ -101,7 +101,6 @@ export const checkInAttendee = async (req: Request, res: Response) => {
 
     const recipient = campaign.recipients[recipientIndex];
 
-    // Check if they are already checked in
     if (recipient.checkedIn) {
       return res.status(400).json({ 
         message: 'Already checked in', 
@@ -110,11 +109,9 @@ export const checkInAttendee = async (req: Request, res: Response) => {
       });
     }
 
-    // Mark as checked in
     campaign.recipients[recipientIndex].checkedIn = true;
     campaign.recipients[recipientIndex].checkedInAt = new Date();
 
-    // Mongoose needs to know the Mixed array changed
     campaign.markModified('recipients');
     await campaign.save();
 

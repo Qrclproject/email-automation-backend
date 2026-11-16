@@ -8,7 +8,6 @@ import sharp from 'sharp';
 import axios from 'axios';
 import { uploadFileToMinio } from '../services/minioService';
 
-// Use the full REDIS_URL provided by Coolify
 const connection = new IORedis(process.env.REDIS_URL as string, {
   maxRetriesPerRequest: null,
 });
@@ -19,21 +18,66 @@ const replaceVariables = (
   mappings: Record<string, string>
 ) => {
   let processed = text;
-  
-  // 1. Replace exact keys from the Step 3 mappings
   Object.entries(mappings).forEach(([templateVar, csvColumn]) => {
     const value = data[csvColumn] || '';
     processed = processed.split(templateVar).join(value);
   });
-
-  // 2. Fallback for any {{Variable}} or [Variable] that wasn't mapped
   Object.keys(data).forEach(key => {
     const value = data[key] || '';
     processed = processed.split(`{{${key}}}`).join(value);
     processed = processed.split(`[${key}]`).join(value);
   });
-  
   return processed;
+};
+
+// Helper to generate SVG for text overlays with font fallbacks
+const generateTextSvg = (text: string, style: any, width: number, height: number) => {
+  const safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const fontWeight = style.bold ? 'bold' : 'normal';
+  const fontStyle = style.italic ? 'italic' : 'normal';
+  
+  // Map frontend fonts to backend safe fallbacks
+  const fontMap: Record<string, string> = {
+    'Montserrat': "Montserrat, 'Trebuchet MS', Arial, sans-serif",
+    'Inter': "Inter, Helvetica, Arial, sans-serif",
+    'Playfair Display': "'Playfair Display', 'Times New Roman', serif",
+    'Roboto': "Roboto, Helvetica, Arial, sans-serif",
+    'Lora': "Lora, Georgia, serif",
+    'Oswald': "Oswald, Impact, 'Arial Narrow', sans-serif",
+    'Dancing Script': "'Dancing Script', 'Comic Sans MS', cursive",
+    'Cinzel': "Cinzel, 'Times New Roman', serif",
+    'Arial': "Arial, sans-serif",
+    'Georgia': "Georgia, serif",
+    'Courier New': "'Courier New', Courier, monospace",
+    'Times New Roman': "'Times New Roman', Times, serif"
+  };
+
+  const fontFamily = fontMap[style.fontFamily] || "Arial, sans-serif";
+  const fontSize = style.fontSize || 24;
+  const color = style.color || '#000000';
+  const alignment = style.alignment || 'center';
+  
+  let textAnchor = 'middle';
+  let x = width / 2;
+  if (alignment === 'left') { textAnchor = 'start'; x = 0; }
+  if (alignment === 'right') { textAnchor = 'end'; x = width; }
+
+  return Buffer.from(`
+    <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      <text 
+        x="${x}" 
+        y="50%" 
+        text-anchor="${textAnchor}" 
+        dominant-baseline="middle" 
+        font-family="${fontFamily}" 
+        font-size="${fontSize}" 
+        fill="${color}" 
+        font-weight="${fontWeight}" 
+        font-style="${fontStyle}">
+        ${safeText}
+      </text>
+    </svg>
+  `);
 };
 
 export const emailWorker = new Worker(
@@ -43,9 +87,7 @@ export const emailWorker = new Worker(
     
     const toEmail = recipientData.email || recipientData['Email Address'] || recipientData['Email'] || recipientData['email address'] || recipientData['email'];
     
-    if (!toEmail) {
-      throw new Error(`Recipient has no email address column mapped. Columns: ${Object.keys(recipientData).join(', ')}`);
-    }
+    if (!toEmail) throw new Error(`No email column mapped. Columns: ${Object.keys(recipientData).join(', ')}`);
 
     try {
       const campaign = await Campaign.findById(campaignId);
@@ -58,7 +100,13 @@ export const emailWorker = new Worker(
       if (campaign.template && campaign.template.imageUrl && campaign.template.qrPosition) {
         const template = campaign.template;
         
-        // Determine what data goes into the QR Code
+        // 1. Download background image
+        const bgRes = await axios.get(template.imageUrl, { responseType: 'arraybuffer' });
+        const bgBuffer = Buffer.from(bgRes.data, 'binary');
+        
+        const compositeLayers: sharp.OverlayOptions[] = [];
+
+        // 2. Generate and Add QR Code
         let qrPayload = 'https://qrcodeng.com';
         if (template.qrDataField && recipientData[template.qrDataField]) {
            qrPayload = recipientData[template.qrDataField];
@@ -66,35 +114,50 @@ export const emailWorker = new Worker(
            qrPayload = recipientData[variableMappings[template.qrDataField]];
         }
 
-        // Download background image
-        const bgRes = await axios.get(template.imageUrl, { responseType: 'arraybuffer' });
-        const bgBuffer = Buffer.from(bgRes.data, 'binary');
-
-        // Generate QR Code
         const qrBuffer = await QRCode.toBuffer(qrPayload, {
           width: Math.round(template.qrPosition.width),
           margin: 1,
-          color: {
-            dark: template.qrConfig?.dataColor || '#000000',
-            light: template.qrConfig?.lightColor || '#ffffff'
-          }
+          color: { dark: template.qrConfig?.dataColor || '#000000', light: template.qrConfig?.lightColor || '#ffffff' }
         });
 
-        // Merge them using Sharp
+        compositeLayers.push({
+          input: qrBuffer,
+          top: Math.round(template.qrPosition.y),
+          left: Math.round(template.qrPosition.x)
+        });
+
+        // 3. Process and Add Text Overlays
+        if (template.textOverlays && template.textOverlays.length > 0) {
+          for (const ov of template.textOverlays) {
+            // Replace variables in text
+            const processedText = replaceVariables(ov.placeholder, recipientData, variableMappings || {});
+            
+            const textSvg = generateTextSvg(
+              processedText, 
+              ov.style, 
+              Math.round(ov.position.width), 
+              Math.round(ov.position.height)
+            );
+
+            compositeLayers.push({
+              input: textSvg,
+              top: Math.round(ov.position.y),
+              left: Math.round(ov.position.x)
+            });
+          }
+        }
+
+        // 4. Merge everything using Sharp
         const compositeBuffer = await sharp(bgBuffer)
-          .composite([{
-            input: qrBuffer,
-            top: Math.round(template.qrPosition.y),
-            left: Math.round(template.qrPosition.x)
-          }])
+          .composite(compositeLayers)
           .png()
           .toBuffer();
 
-        // Upload merged image to MinIO
+        // 5. Upload final image to MinIO
         const mergedFileName = `merged/${campaignId}-${toEmail}-${Date.now()}.png`;
         const finalImageUrl = await uploadFileToMinio(compositeBuffer, mergedFileName, 'image/png');
 
-        // Replace the background URL in the HTML body with the new merged image
+        // 6. Replace background URL in email HTML
         finalBody = finalBody.split(template.imageUrl).join(finalImageUrl);
       }
       // -------------------------------
@@ -183,7 +246,6 @@ export const emailWorker = new Worker(
 emailWorker.on('completed', (job) => {
   console.log(`Job ${job.id} completed!`);
 });
-
 
 emailWorker.on('failed', (job, err) => {
   console.log(`Job ${job?.id} failed with error ${err.message}`);

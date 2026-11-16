@@ -15,7 +15,7 @@ router.route('/')
   .get(protect, getCampaigns)
   .post(protect, createCampaign);
 
-// --- NEW CHECK-IN ROUTE ---
+// Check-in Route
 router.route('/:id/checkin')
   .post(protect, checkInAttendee);
 

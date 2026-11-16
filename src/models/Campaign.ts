@@ -5,9 +5,9 @@ export interface ICampaign extends Document {
   subject: string;
   status: 'Draft' | 'Awaiting Approval' | 'Approved' | 'Scheduled' | 'Sending' | 'Paused' | 'Completed' | 'Cancelled' | 'Failed';
   senderAccount: string;
-  template: any;
+  template: any; // Can contain qrPosition, qrConfig, imageUrl, textOverlays
   columns: string[];
-  recipients: any[]; // This is crucial for the check-in data to save
+  recipients: any[]; // Contains { data: {}, status: 'Pending', checkedIn: boolean, checkedInAt: Date }
   variableMappings: Record<string, string>;
   emailBody: string;
   attachments: string[];
@@ -29,7 +29,7 @@ const campaignSchema: Schema = new Schema({
   senderAccount: { type: String, required: true },
   template: { type: Schema.Types.Mixed },
   columns: [{ type: String }],
-  recipients: [{ type: Schema.Types.Mixed }], // Mixed allows us to add checkedIn/checkedInAt without schema changes
+  recipients: [{ type: Schema.Types.Mixed }], 
   variableMappings: { type: Schema.Types.Mixed },
   emailBody: { type: String },
   attachments: [{ type: String }],
