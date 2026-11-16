@@ -184,6 +184,7 @@ emailWorker.on('completed', (job) => {
   console.log(`Job ${job.id} completed!`);
 });
 
+
 emailWorker.on('failed', (job, err) => {
   console.log(`Job ${job?.id} failed with error ${err.message}`);
 });
