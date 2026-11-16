@@ -7,7 +7,7 @@ export interface ICampaign extends Document {
   senderAccount: string;
   template: any;
   columns: string[];
-  recipients: any[];
+  recipients: any[]; // This is crucial for the check-in data to save
   variableMappings: Record<string, string>;
   emailBody: string;
   attachments: string[];
@@ -29,7 +29,7 @@ const campaignSchema: Schema = new Schema({
   senderAccount: { type: String, required: true },
   template: { type: Schema.Types.Mixed },
   columns: [{ type: String }],
-  recipients: [{ type: Schema.Types.Mixed }],
+  recipients: [{ type: Schema.Types.Mixed }], // Mixed allows us to add checkedIn/checkedInAt without schema changes
   variableMappings: { type: Schema.Types.Mixed },
   emailBody: { type: String },
   attachments: [{ type: String }],
