@@ -104,13 +104,35 @@ export const emailWorker = new Worker(
         
         const compositeLayers: sharp.OverlayOptions[] = [];
 
-        // 2. Generate and Add QR Code (FIXED)
+        // 2. Generate and Add QR Code (UPDATED WITH SMART FALLBACKS)
         let qrPayload = 'https://qrcodeng.com';
         
         if (template.qrDataField) {
-          // Resolve the variable string (e.g., {{Email Address}} -> john@example.com)
-          const resolved = replaceVariables(template.qrDataField, recipientData, variableMappings || {});
-          // If it doesn't contain unresolved brackets, use it
+          // Try to resolve the variable using the mappings first
+          let resolved = replaceVariables(template.qrDataField, recipientData, variableMappings || {});
+          
+          // If it still contains brackets, it means the user forgot to map it in Step 3.
+          // Let's try to find a matching column automatically.
+          if (resolved.includes('{{') || resolved.includes('[')) {
+             const cleanFieldName = template.qrDataField.replace(/[{}\[\]]/g, '').trim(); // e.g. "Email Address"
+             
+             // 1. Try exact match or lowercase match (e.g. "Email Address" or "email address")
+             if (recipientData[cleanFieldName]) {
+                 resolved = recipientData[cleanFieldName];
+             } else if (recipientData[cleanFieldName.toLowerCase()]) {
+                 resolved = recipientData[cleanFieldName.toLowerCase()];
+             } 
+             // 2. Smart fallback for Emails
+             else if (cleanFieldName.toLowerCase().includes('email')) {
+                 resolved = recipientData['email'] || recipientData['Email'] || recipientData['Email Address'] || 'https://qrcodeng.com';
+             } 
+             // 3. Smart fallback for Names
+             else if (cleanFieldName.toLowerCase().includes('name')) {
+                 resolved = recipientData['Full Name'] || recipientData['Name'] || recipientData['name'] || recipientData['Attendee Name'] || 'https://qrcodeng.com';
+             }
+          }
+          
+          // If we successfully resolved it and it's not just brackets, set the payload
           if (!resolved.includes('{{') && !resolved.includes('[')) {
             qrPayload = resolved;
           }
@@ -132,14 +154,7 @@ export const emailWorker = new Worker(
         if (template.textOverlays && template.textOverlays.length > 0) {
           for (const ov of template.textOverlays) {
             const processedText = replaceVariables(ov.placeholder, recipientData, variableMappings || {});
-            
-            const textSvg = generateTextSvg(
-              processedText, 
-              ov.style, 
-              Math.round(ov.position.width), 
-              Math.round(ov.position.height)
-            );
-
+            const textSvg = generateTextSvg(processedText, ov.style, Math.round(ov.position.width), Math.round(ov.position.height));
             compositeLayers.push({
               input: textSvg,
               top: Math.round(ov.position.y),
