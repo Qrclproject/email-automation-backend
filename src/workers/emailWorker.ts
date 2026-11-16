@@ -30,13 +30,11 @@ const replaceVariables = (
   return processed;
 };
 
-// Helper to generate SVG for text overlays with font fallbacks
 const generateTextSvg = (text: string, style: any, width: number, height: number) => {
   const safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const fontWeight = style.bold ? 'bold' : 'normal';
   const fontStyle = style.italic ? 'italic' : 'normal';
   
-  // Map frontend fonts to backend safe fallbacks
   const fontMap: Record<string, string> = {
     'Montserrat': "Montserrat, 'Trebuchet MS', Arial, sans-serif",
     'Inter': "Inter, Helvetica, Arial, sans-serif",
@@ -106,12 +104,16 @@ export const emailWorker = new Worker(
         
         const compositeLayers: sharp.OverlayOptions[] = [];
 
-        // 2. Generate and Add QR Code
+        // 2. Generate and Add QR Code (FIXED)
         let qrPayload = 'https://qrcodeng.com';
-        if (template.qrDataField && recipientData[template.qrDataField]) {
-           qrPayload = recipientData[template.qrDataField];
-        } else if (variableMappings[template.qrDataField]) {
-           qrPayload = recipientData[variableMappings[template.qrDataField]];
+        
+        if (template.qrDataField) {
+          // Resolve the variable string (e.g., {{Email Address}} -> john@example.com)
+          const resolved = replaceVariables(template.qrDataField, recipientData, variableMappings || {});
+          // If it doesn't contain unresolved brackets, use it
+          if (!resolved.includes('{{') && !resolved.includes('[')) {
+            qrPayload = resolved;
+          }
         }
 
         const qrBuffer = await QRCode.toBuffer(qrPayload, {
@@ -129,7 +131,6 @@ export const emailWorker = new Worker(
         // 3. Process and Add Text Overlays
         if (template.textOverlays && template.textOverlays.length > 0) {
           for (const ov of template.textOverlays) {
-            // Replace variables in text
             const processedText = replaceVariables(ov.placeholder, recipientData, variableMappings || {});
             
             const textSvg = generateTextSvg(
