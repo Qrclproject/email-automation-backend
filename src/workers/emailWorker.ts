@@ -3,6 +3,7 @@ import IORedis from 'ioredis';
 import { google } from 'googleapis';
 import { createOAuth2Client } from '../services/googleAuthService';
 import Campaign from '../models/Campaign';
+import Account from '../models/Account'; // <-- Added missing import
 import QRCode from 'qrcode';
 import sharp from 'sharp';
 import axios from 'axios';
@@ -243,6 +244,13 @@ export const emailWorker = new Worker(
       });
 
       console.log(`✅ Sent to ${toEmail}`);
+
+      // --- FIXED: Increment sentToday quota for the account ---
+      await Account.updateOne(
+        { email: senderEmail },
+        { $inc: { sentToday: 1 } }
+      );
+      // --------------------------------------------------------
 
       const updatedCampaign = await Campaign.findByIdAndUpdate(
         campaignId,
