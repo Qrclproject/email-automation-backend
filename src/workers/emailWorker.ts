@@ -29,23 +29,29 @@ const replaceVariables = (
   });
   return processed;
 };
+
 const generateTextSvg = (text: string, style: any, width: number, height: number) => {
-  const safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // 1. Sanitize the text to remove emojis and special characters that cause boxes (Tofu)
+  // This keeps standard letters, numbers, spaces, and basic punctuation.
+  const sanitizedText = text.replace(/[^\x20-\x7E\u00A0-\u024F]/g, '');
+
+  const safeText = sanitizedText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const fontWeight = style.bold ? 'bold' : 'normal';
   const fontStyle = style.italic ? 'italic' : 'normal';
   
+  // 2. Map frontend fonts to standard fonts available on the server (Linux/Docker)
   const fontMap: Record<string, string> = {
-    'Montserrat': "Montserrat, 'Trebuchet MS', Arial, sans-serif",
-    'Inter': "Inter, Helvetica, Arial, sans-serif",
-    'Playfair Display': "'Playfair Display', 'Times New Roman', serif",
-    'Roboto': "Roboto, Helvetica, Arial, sans-serif",
-    'Lora': "Lora, Georgia, serif",
-    'Oswald': "Oswald, Impact, 'Arial Narrow', sans-serif",
-    'Dancing Script': "'Dancing Script', 'Comic Sans MS', cursive",
-    'Cinzel': "Cinzel, 'Times New Roman', serif",
+    'Montserrat': "Arial, sans-serif",
+    'Inter': "Arial, sans-serif",
+    'Playfair Display': "'Times New Roman', serif",
+    'Roboto': "Arial, sans-serif",
+    'Lora': "Georgia, serif",
+    'Oswald': "Impact, sans-serif",
+    'Dancing Script': "cursive",
+    'Cinzel': "'Times New Roman', serif",
     'Arial': "Arial, sans-serif",
     'Georgia': "Georgia, serif",
-    'Courier New': "'Courier New', Courier, monospace",
+    'Courier New': "'Courier New', monospace",
     'Times New Roman': "'Times New Roman', Times, serif"
   };
 
@@ -112,7 +118,7 @@ export const emailWorker = new Worker(
         
         const compositeLayers: sharp.OverlayOptions[] = [];
 
-        // 2. Generate and Add QR Code (UPDATED WITH SMART FALLBACKS)
+        // 2. Generate and Add QR Code (WITH SMART FALLBACKS)
         let qrPayload = 'https://qrcodeng.com';
         
         if (template.qrDataField) {
@@ -124,7 +130,7 @@ export const emailWorker = new Worker(
           if (resolved.includes('{{') || resolved.includes('[')) {
              const cleanFieldName = template.qrDataField.replace(/[{}\[\]]/g, '').trim(); // e.g. "Email Address"
              
-             // 1. Try exact match or lowercase match (e.g. "Email Address" or "email address")
+             // 1. Try exact match or lowercase match
              if (recipientData[cleanFieldName]) {
                  resolved = recipientData[cleanFieldName];
              } else if (recipientData[cleanFieldName.toLowerCase()]) {
