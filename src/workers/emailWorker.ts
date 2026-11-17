@@ -3,7 +3,7 @@ import IORedis from 'ioredis';
 import { google } from 'googleapis';
 import { createOAuth2Client } from '../services/googleAuthService';
 import Campaign from '../models/Campaign';
-import Account from '../models/Account'; // <-- Added missing import
+import Account from '../models/Account'; // <-- ADDED IMPORT
 import QRCode from 'qrcode';
 import sharp from 'sharp';
 import axios from 'axios';
@@ -135,6 +135,17 @@ export const emailWorker = new Worker(
       const campaign = await Campaign.findById(campaignId);
       if (!campaign) throw new Error('Campaign not found');
 
+      // --- QUOTA CHECK ---
+      const account = await Account.findOne({ email: senderEmail });
+      if (!account) throw new Error(`Account ${senderEmail} not found in database.`);
+
+      if (account.sentToday >= account.dailyLimit) {
+        // Pause the campaign if the limit is reached
+        await Campaign.findByIdAndUpdate(campaignId, { status: 'Paused' });
+        throw new Error(`Daily sending limit reached for ${senderEmail}. Campaign paused.`);
+      }
+      // -------------------
+
       let finalBody = replaceVariables(body, recipientData, variableMappings || {});
       const finalSubject = replaceVariables(subject, recipientData, variableMappings || {});
 
@@ -152,11 +163,8 @@ export const emailWorker = new Worker(
         let qrPayload = 'https://qrcodeng.com';
 
         if (template.qrDataField) {
-          // Try to resolve the variable using the mappings first
           let resolved = replaceVariables(template.qrDataField, recipientData, variableMappings || {});
 
-          // If it still contains brackets, the user forgot to map it in Step 3.
-          // Try to find a matching column automatically.
           if (resolved.includes('{{') || resolved.includes('[')) {
             const cleanFieldName = template.qrDataField.replace(/[{}\[\]]/g, '').trim();
 
@@ -245,12 +253,12 @@ export const emailWorker = new Worker(
 
       console.log(`✅ Sent to ${toEmail}`);
 
-      // --- FIXED: Increment sentToday quota for the account ---
+      // --- INCREMENT QUOTA ---
       await Account.updateOne(
         { email: senderEmail },
         { $inc: { sentToday: 1 } }
       );
-      // --------------------------------------------------------
+      // -----------------------
 
       const updatedCampaign = await Campaign.findByIdAndUpdate(
         campaignId,
