@@ -1,2 +1,10 @@
 [phases.setup]
-aptPkgs = ["fontconfig", "fonts-dejavu-core", "fonts-liberation"]
+aptPkgs = ["...", "fontconfig", "fonts-liberation", "fonts-dejavu-core"]
+
+[phases.build]
+cmds = [
+  "mkdir -p /usr/share/fonts/truetype/custom",
+  "cp fonts/*.ttf /usr/share/fonts/truetype/custom/ || true",
+  "fc-cache -f",
+  "npm run build"
+]

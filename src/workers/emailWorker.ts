@@ -13,8 +13,8 @@ const connection = new IORedis(process.env.REDIS_URL as string, {
 });
 
 const replaceVariables = (
-  text: string, 
-  data: Record<string, string>, 
+  text: string,
+  data: Record<string, string>,
   mappings: Record<string, string>
 ) => {
   let processed = text;
@@ -30,64 +30,93 @@ const replaceVariables = (
   return processed;
 };
 
-const generateTextSvg = (text: string, style: any, width: number, height: number) => {
-  // 1. Sanitize the text to remove emojis and special characters that cause boxes (Tofu)
-  // This keeps standard letters, numbers, spaces, and basic punctuation.
-  const sanitizedText = text.replace(/[^\x20-\x7E\u00A0-\u024F]/g, '');
+// Generic fallbacks used after the real font name
+const fontFallbacks: Record<string, string> = {
+  'Montserrat': 'Arial, sans-serif',
+  'Inter': 'Arial, sans-serif',
+  'Playfair Display': "'Times New Roman', serif",
+  'Roboto': 'Arial, sans-serif',
+  'Lora': 'Georgia, serif',
+  'Oswald': 'Arial, sans-serif',
+  'Dancing Script': 'cursive',
+  'Cinzel': "'Times New Roman', serif",
+  'Arial': 'Arial, sans-serif',
+  'Georgia': 'Georgia, serif',
+  'Courier New': "'Courier New', monospace",
+  'Times New Roman': "'Times New Roman', serif",
+};
 
-  const safeText = sanitizedText.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const escapeXml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// Word-wrap using an approximate character width (librsvg can't measure text)
+const wrapText = (text: string, maxWidth: number, fontSize: number, bold: boolean): string[] => {
+  const charWidth = fontSize * (bold ? 0.6 : 0.55);
+  const maxChars = Math.max(1, Math.floor(maxWidth / charWidth));
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let current = '';
+  for (const word of words) {
+    const test = current ? `${current} ${word}` : word;
+    if (test.length <= maxChars) {
+      current = test;
+    } else {
+      if (current) lines.push(current);
+      current = word;
+    }
+  }
+  if (current) lines.push(current);
+  return lines;
+};
+
+const generateTextSvg = (text: string, style: any, width: number, height: number) => {
+  // Remove emojis/special chars that have no glyphs
+  let cleanText = text.replace(/[^\x20-\x7E\u00A0-\u024F]/g, '');
+
+  // Match the editor's text-transform
+  if (style.textTransform === 'uppercase') cleanText = cleanText.toUpperCase();
+  else if (style.textTransform === 'lowercase') cleanText = cleanText.toLowerCase();
+  else if (style.textTransform === 'capitalize') cleanText = cleanText.replace(/\b\w/g, c => c.toUpperCase());
+
   const fontWeight = style.bold ? 'bold' : 'normal';
   const fontStyle = style.italic ? 'italic' : 'normal';
-  
-  // 2. Map frontend fonts to standard fonts available on the server (Linux/Docker)
-  const fontMap: Record<string, string> = {
-    'Montserrat': "Arial, sans-serif",
-    'Inter': "Arial, sans-serif",
-    'Playfair Display': "'Times New Roman', serif",
-    'Roboto': "Arial, sans-serif",
-    'Lora': "Georgia, serif",
-    'Oswald': "Impact, sans-serif",
-    'Dancing Script': "cursive",
-    'Cinzel': "'Times New Roman', serif",
-    'Arial': "Arial, sans-serif",
-    'Georgia': "Georgia, serif",
-    'Courier New': "'Courier New', monospace",
-    'Times New Roman': "'Times New Roman', Times, serif"
-  };
-
-  const fontFamily = fontMap[style.fontFamily] || "Arial, sans-serif";
   const fontSize = style.fontSize || 24;
+  const lineHeight = (style.lineHeight || 1.4) * fontSize;
   const color = style.color || '#000000';
   const alignment = style.alignment || 'center';
-  
+
+  // Real font name first (installed on the server), generic fallback after
+  const safeName = String(style.fontFamily || 'Arial').replace(/[^\w \-]/g, '');
+  const fontFamily = `'${safeName}', ${fontFallbacks[safeName] || 'Arial, sans-serif'}`;
+
+  // Padding matches the editor's p-1 (4px)
+  const pad = 4;
   let textAnchor = 'middle';
   let x = width / 2;
-  if (alignment === 'left') { textAnchor = 'start'; x = 0; }
-  if (alignment === 'right') { textAnchor = 'end'; x = width; }
+  if (alignment === 'left') { textAnchor = 'start'; x = pad; }
+  if (alignment === 'right') { textAnchor = 'end'; x = width - pad; }
 
-  // Check if a background color is set
-  const bgColor = style.backgroundColor && style.backgroundColor !== 'transparent' ? style.backgroundColor : 'none';
-  
-  // Draw rect if bgColor is not 'none'
-  const bgRect = bgColor !== 'none' 
-    ? `<rect width="${width}" height="${height}" fill="${bgColor}" rx="4" />` 
-    : '';
+  const bgColor = style.backgroundColor && style.backgroundColor !== 'transparent' ? style.backgroundColor : null;
+  const bgRect = bgColor ? `<rect width="${width}" height="${height}" fill="${bgColor}" />` : '';
+
+  // Wrap and clip lines to the box, like the editor does
+  const lines = wrapText(cleanText, width - pad * 2, fontSize, !!style.bold);
+  const tspans = lines
+    .map((line, i) => ({ line, baseline: pad + i * lineHeight + fontSize * 0.85 }))
+    .filter(l => l.baseline <= height)
+    .map(l => `<tspan x="${x}" y="${l.baseline}">${escapeXml(l.line)}</tspan>`)
+    .join('');
 
   return Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       ${bgRect}
-      <text 
-        x="${x}" 
-        y="50%" 
-        text-anchor="${textAnchor}" 
-        dominant-baseline="middle" 
-        font-family="${fontFamily}" 
-        font-size="${fontSize}" 
-        fill="${color}" 
-        font-weight="${fontWeight}" 
-        font-style="${fontStyle}">
-        ${safeText}
-      </text>
+      <text
+        text-anchor="${textAnchor}"
+        font-family="${fontFamily}"
+        font-size="${fontSize}"
+        fill="${color}"
+        font-weight="${fontWeight}"
+        font-style="${fontStyle}">${tspans}</text>
     </svg>
   `);
 };
@@ -96,9 +125,9 @@ export const emailWorker = new Worker(
   'email-sending',
   async (job) => {
     const { recipientData, subject, body, senderEmail, refreshToken, campaignId, variableMappings } = job.data;
-    
+
     const toEmail = recipientData.email || recipientData['Email Address'] || recipientData['Email'] || recipientData['email address'] || recipientData['email'];
-    
+
     if (!toEmail) throw new Error(`No email column mapped. Columns: ${Object.keys(recipientData).join(', ')}`);
 
     try {
@@ -111,42 +140,36 @@ export const emailWorker = new Worker(
       // --- IMAGE COMPOSITING LOGIC ---
       if (campaign.template && campaign.template.imageUrl && campaign.template.qrPosition) {
         const template = campaign.template;
-        
+
         // 1. Download background image
         const bgRes = await axios.get(template.imageUrl, { responseType: 'arraybuffer' });
         const bgBuffer = Buffer.from(bgRes.data, 'binary');
-        
+
         const compositeLayers: sharp.OverlayOptions[] = [];
 
         // 2. Generate and Add QR Code (WITH SMART FALLBACKS)
         let qrPayload = 'https://qrcodeng.com';
-        
+
         if (template.qrDataField) {
           // Try to resolve the variable using the mappings first
           let resolved = replaceVariables(template.qrDataField, recipientData, variableMappings || {});
-          
-          // If it still contains brackets, it means the user forgot to map it in Step 3.
-          // Let's try to find a matching column automatically.
+
+          // If it still contains brackets, the user forgot to map it in Step 3.
+          // Try to find a matching column automatically.
           if (resolved.includes('{{') || resolved.includes('[')) {
-             const cleanFieldName = template.qrDataField.replace(/[{}\[\]]/g, '').trim(); // e.g. "Email Address"
-             
-             // 1. Try exact match or lowercase match
-             if (recipientData[cleanFieldName]) {
-                 resolved = recipientData[cleanFieldName];
-             } else if (recipientData[cleanFieldName.toLowerCase()]) {
-                 resolved = recipientData[cleanFieldName.toLowerCase()];
-             } 
-             // 2. Smart fallback for Emails
-             else if (cleanFieldName.toLowerCase().includes('email')) {
-                 resolved = recipientData['email'] || recipientData['Email'] || recipientData['Email Address'] || 'https://qrcodeng.com';
-             } 
-             // 3. Smart fallback for Names
-             else if (cleanFieldName.toLowerCase().includes('name')) {
-                 resolved = recipientData['Full Name'] || recipientData['Name'] || recipientData['name'] || recipientData['Attendee Name'] || 'https://qrcodeng.com';
-             }
+            const cleanFieldName = template.qrDataField.replace(/[{}\[\]]/g, '').trim();
+
+            if (recipientData[cleanFieldName]) {
+              resolved = recipientData[cleanFieldName];
+            } else if (recipientData[cleanFieldName.toLowerCase()]) {
+              resolved = recipientData[cleanFieldName.toLowerCase()];
+            } else if (cleanFieldName.toLowerCase().includes('email')) {
+              resolved = recipientData['email'] || recipientData['Email'] || recipientData['Email Address'] || 'https://qrcodeng.com';
+            } else if (cleanFieldName.toLowerCase().includes('name')) {
+              resolved = recipientData['Full Name'] || recipientData['Name'] || recipientData['name'] || recipientData['Attendee Name'] || 'https://qrcodeng.com';
+            }
           }
-          
-          // If we successfully resolved it and it's not just brackets, set the payload
+
           if (!resolved.includes('{{') && !resolved.includes('[')) {
             qrPayload = resolved;
           }
@@ -243,18 +266,18 @@ export const emailWorker = new Worker(
       return { success: true, email: toEmail };
     } catch (error: any) {
       console.error(`❌ Failed to send to ${toEmail}:`, error.message);
-      
+
       const campaign = await Campaign.findById(campaignId);
       if (campaign) {
         const recipientIndex = campaign.recipients.findIndex(
           (r: any) => r.data === recipientData || r.data?.email === toEmail || r.data?.['Email Address'] === toEmail
         );
-        
+
         if (recipientIndex !== -1) {
           campaign.recipients[recipientIndex].status = 'Failed';
           campaign.recipients[recipientIndex].error = error.message;
         }
-        
+
         campaign.failedCount = (campaign.failedCount || 0) + 1;
         const total = campaign.recipients.length;
         const processed = (campaign.sentCount || 0) + campaign.failedCount;
@@ -264,10 +287,10 @@ export const emailWorker = new Worker(
         await campaign.save();
       }
 
-      throw error; 
+      throw error;
     }
   },
-  { 
+  {
     connection,
     limiter: { max: 5, duration: 5000 }
   }
