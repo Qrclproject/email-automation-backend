@@ -29,7 +29,6 @@ const replaceVariables = (
   });
   return processed;
 };
-
 const generateTextSvg = (text: string, style: any, width: number, height: number) => {
   const safeText = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const fontWeight = style.bold ? 'bold' : 'normal';
@@ -60,8 +59,17 @@ const generateTextSvg = (text: string, style: any, width: number, height: number
   if (alignment === 'left') { textAnchor = 'start'; x = 0; }
   if (alignment === 'right') { textAnchor = 'end'; x = width; }
 
+  // Check if a background color is set
+  const bgColor = style.backgroundColor && style.backgroundColor !== 'transparent' ? style.backgroundColor : 'none';
+  
+  // Draw rect if bgColor is not 'none'
+  const bgRect = bgColor !== 'none' 
+    ? `<rect width="${width}" height="${height}" fill="${bgColor}" rx="4" />` 
+    : '';
+
   return Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
+      ${bgRect}
       <text 
         x="${x}" 
         y="50%" 
