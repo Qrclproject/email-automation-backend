@@ -45,6 +45,12 @@ export const handleCallback = async (req: Request, res: Response) => {
       return res.status(400).send('Could not retrieve email address.');
     }
 
+    // --- AUTO IDENTIFY LIMIT ---
+    // Free accounts end with @gmail.com. Everything else gets the Workspace limit.
+    const isFreeGmail = email.toLowerCase().endsWith('@gmail.com');
+    const detectedLimit = isFreeGmail ? 500 : 2000;
+    // ---------------------------
+
     await Account.findOneAndUpdate(
       { email: email },
       {
@@ -54,8 +60,10 @@ export const handleCallback = async (req: Request, res: Response) => {
         refreshToken: tokens.refresh_token,
         status: 'connected',
         lastTokenRefresh: new Date(),
+        // Only set the detected limit if it's a brand new account connection
+        $setOnInsert: { dailyLimit: detectedLimit } 
       },
-      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true } // <-- Fixed here
+      { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
     );
 
     res.redirect(`${process.env.FRONTEND_URL}/accounts?connected=true`);
@@ -78,10 +86,15 @@ export const getAccounts = async (req: AuthRequest, res: Response) => {
 // PUT /api/accounts/:id
 export const updateAccount = async (req: Request, res: Response) => {
   try {
+    const { dailyLimit, permissions } = req.body;
+    const updateData: any = {};
+    if (dailyLimit !== undefined) updateData.dailyLimit = dailyLimit;
+    if (permissions !== undefined) updateData.permissions = permissions;
+
     const updated = await Account.findByIdAndUpdate(
       req.params.id, 
-      req.body, 
-      { returnDocument: 'after' } // <-- Fixed here
+      { $set: updateData }, 
+      { returnDocument: 'after' }
     );
     res.json(updated);
   } catch (error: any) {
