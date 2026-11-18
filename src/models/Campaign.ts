@@ -5,10 +5,11 @@ export interface ICampaign extends Document {
   subject: string;
   status: 'Draft' | 'Awaiting Approval' | 'Approved' | 'Scheduled' | 'Sending' | 'Paused' | 'Completed' | 'Cancelled' | 'Failed';
   senderAccount: string;
-  template: any; // Can contain qrPosition, qrConfig, imageUrl, textOverlays
+  template: any; 
   columns: string[];
-  recipients: any[]; // Contains { data: {}, status: 'Pending', checkedIn: boolean, checkedInAt: Date }
+  recipients: any[]; 
   variableMappings: Record<string, string>;
+  checkInDisplayColumns: string[]; // <-- ADDED THIS
   emailBody: string;
   attachments: string[];
   sentCount: number;
@@ -31,6 +32,7 @@ const campaignSchema: Schema = new Schema({
   columns: [{ type: String }],
   recipients: [{ type: Schema.Types.Mixed }], 
   variableMappings: { type: Schema.Types.Mixed },
+  checkInDisplayColumns: [{ type: String }], // <-- ADDED THIS
   emailBody: { type: String },
   attachments: [{ type: String }],
   sentCount: { type: Number, default: 0 },
