@@ -6,7 +6,8 @@ import {
   updateCampaign, 
   deleteCampaign,
   checkInAttendee,
-  appendRecipients // <-- Import
+  appendRecipients,
+  resetCheckIn // <-- Import
 } from '../controllers/campaignController';
 import { protect } from '../middlewares/authMiddleware';
 
@@ -16,13 +17,16 @@ router.route('/')
   .get(protect, getCampaigns)
   .post(protect, createCampaign);
 
-// Check-in Route
+// Check-in Routes
 router.route('/:id/checkin')
   .post(protect, checkInAttendee);
 
+router.route('/:id/reset-checkin')
+  .post(protect, resetCheckIn); // <-- Add reset route
+
 // Append Recipients Route
 router.route('/:id/recipients')
-  .post(protect, appendRecipients); // <-- Add route
+  .post(protect, appendRecipients);
 
 router.route('/:id')
   .get(protect, getCampaignById)

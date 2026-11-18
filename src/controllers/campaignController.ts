@@ -55,30 +55,24 @@ export const createCampaign = async (req: Request, res: Response) => {
   }
 };
 
-// --- NEW: Append Recipients to an existing Campaign ---
 export const appendRecipients = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const { recipients } = req.body; // Array of { data: {}, status: 'Pending' }
+    const { recipients } = req.body; 
 
     const campaign = await Campaign.findById(id);
     if (!campaign) return res.status(404).json({ message: 'Campaign not found' });
 
-    // 1. Append the new recipients to the existing array
     campaign.recipients.push(...recipients);
-
-    // 2. Reset the campaign status so the worker continues processing
     campaign.status = 'Sending';
-
     await campaign.save();
 
-    // 3. Get the sender account to queue the new emails
     const account = await Account.findOne({ email: campaign.senderAccount });
     
     if (account && account.refreshToken) {
       await addEmailsToQueue(
         campaign._id.toString(),
-        recipients, // Only queue the newly added emails
+        recipients, 
         campaign.subject,
         campaign.emailBody,
         account.email,
@@ -159,6 +153,46 @@ export const checkInAttendee = async (req: Request, res: Response) => {
       attendee: recipient.data,
       checkedInAt: campaign.recipients[recipientIndex].checkedInAt
     });
+
+  } catch (error: any) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+// --- NEW: RESET CHECK-IN ---
+export const resetCheckIn = async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const { email } = req.body; // Use email as the unique identifier
+
+    if (!email) {
+      return res.status(400).json({ message: 'Recipient email is required to reset check-in.' });
+    }
+
+    const campaign = await Campaign.findById(id);
+    if (!campaign) {
+      return res.status(404).json({ message: 'Campaign not found' });
+    }
+
+    // Find the recipient by checking if any column matches the email
+    const recipientIndex = campaign.recipients.findIndex((r: any) => {
+      return Object.values(r.data).some(
+        (val) => String(val).trim().toLowerCase() === email.trim().toLowerCase()
+      );
+    });
+
+    if (recipientIndex === -1) {
+      return res.status(404).json({ message: 'Recipient not found.' });
+    }
+
+    // Reset the flags
+    campaign.recipients[recipientIndex].checkedIn = false;
+    campaign.recipients[recipientIndex].checkedInAt = null;
+
+    campaign.markModified('recipients');
+    await campaign.save();
+
+    res.status(200).json({ message: 'Check-in reset successfully', campaign });
 
   } catch (error: any) {
     res.status(500).json({ message: error.message });
